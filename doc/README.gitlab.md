@@ -64,13 +64,16 @@ GitLab places projects in so called groups, sometimes also called namespaces.
 $ ./gitlab group list
 images
 poc
+$
+```
 
-$ # results displayed as a list of records by default
-$ # the next command changes output format to table
+Results displayed as a list of records by default. The next command changes output format to table.
 
+```shell
 $ ./gitlab group list --format table
 7	Private	images	https://gitlab.local/groups/images	Group for all container images
-3	Private	vzpoc	  https://gitlab.local/groups/poc	  POC Projects
+3	Private	vzpoc	https://gitlab.local/groups/poc	  POC Projects
+$
 ```
 
 ### Add new GitLab group
@@ -87,11 +90,12 @@ $ ./gitlab group add --group devops --description "DevOps related projects"
   "web_url": "https://gitlab.local/groups/devops"
 }
 gitlab: successfully added group "devops"
+$
 ```
 
 ### Add new GitLab project
 
-```json
+```shell
 $ ./gitlab project add --project devtest --group devops --description "Test harness"
 {
   "id": 149,
@@ -139,4 +143,14 @@ $ ./gitlab project add --project devtest --group devops --description "Test harn
   "public_builds": true
 }
 gitlab: project created successfully
+$
+```
+
+### List GitLab users
+
+```shell
+$ ./gitlab user list --format table
+41	active	jlee	Jay Lee	jlee@poc.local	ldapmain	CN=Jay Lee,OU=Star Agency,OU=EXT,OU=HOSTING,DC=LOCAL
+33	active	jdoe	John Doe	jdoe@poc.local	ldapmain	CN=John Doe,OU=Star Agency,OU=EXT,OU=HOSTING,DC=LOCAL
+$
 ```
