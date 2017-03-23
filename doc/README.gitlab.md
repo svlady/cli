@@ -1,4 +1,4 @@
-## gitlab CLI configuration
+## GitLab CLI configuration
 
 The CLI tool requires two parameters for accessing GitLab API endpoint:
 
@@ -72,7 +72,7 @@ Results displayed as a list of records by default. The next command changes outp
 ```shell
 $ ./gitlab group list --format table
 7	Private	images	https://gitlab.local/groups/images	Group for all container images
-3	Private	vzpoc	https://gitlab.local/groups/poc	  POC Projects
+3	Private	vzpoc	https://gitlab.local/groups/poc		POC Projects
 $
 ```
 
@@ -150,7 +150,7 @@ $
 
 ```shell
 $ ./gitlab user list --format table
-41	active	jlee	Jay Lee	jlee@poc.local	ldapmain	CN=Jay Lee,OU=Star Agency,OU=EXT,OU=HOSTING,DC=LOCAL
+41	active	jlee	Jane Lee	jlee@poc.local	ldapmain	CN=Jane Lee,OU=Star Agency,OU=EXT,OU=HOSTING,DC=LOCAL
 33	active	jdoe	John Doe	jdoe@poc.local	ldapmain	CN=John Doe,OU=Star Agency,OU=EXT,OU=HOSTING,DC=LOCAL
 $
 ```
