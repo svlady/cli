@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+
+# -------------------------------------------------------------------------------
+#
+#    Copyright (c) 2016 Slava Vladyshevsky. All rights reserved.
+#    Licensed under the MIT License. See LICENSE file in the project root.
+#
+#    Author:  Slava Vladyshevsky <slava.vladyshevsky(a)gmail.com>
+#    Project: DevOps Automation
+#
+#    Hashicorp Vault CLI
+#
+# -------------------------------------------------------------------------------
+
+### configuration section begin
+set -a
+
+# shell environment may override the default value for this variable
+CLI_HOME=${CLI_HOME:-"/opt/cli"}
+
+set +a
+### configuration section end
+
+[[ -f ${CLI_HOME}/cli.lib ]] && . ${CLI_HOME}/cli.lib \
+  || { echo >&2 "cannot load ${CLI_HOME}/cli.lib, exiting"; exit 127; }
+
+if [[ $# -lt 2 ]]; then
+  echo "Hashicorp Vault CLI"
+  echo "Usage: ./${ME} <action> <key path> [<value>]"
+  echo ""
+  echo "<key path> - the key path in the secure storage, has the following format"
+  echo "             /<key>/.../<path> and can be up to 128 chars long. Currently"
+  echo "             all keys are put under /secret prefix."
+  echo "<value>    - the value string can be up to 1024 chars long and may contain"
+  echo "             any ASCII characters but double-quotes."
+  echo ""
+  echo "Supported actions:"
+  egrep '^[[:space:]]*#H#' ${0} | sed 's/#H#/ /g'
+  exit 0
+fi
+
+cmd=${1:-}
+path=${2:-}
+value=${3:-}
+JQ_OPT="-r"
+
+# checking required variables and tools
+assertVar VAULT_API
+assertVar VAULT_TOKEN
+
+command -v jq &>/dev/null || die "required tool jq is not found, exiting"
+
+# The Vault API does not limit characters used in the key path for the generic 
+# backend with slash (/) being considered the only special character. We'll be 
+# more prohibitive here and will only allow certain key charset and key length 
+validateRegexp path 128 '^(/[A-Za-z0-9@.,:;=_-]+)+/?$'
+
+# this temporary folder will be removed upon exit or error
+makeTempDir
+
+function apiCall () {
+  local _result=$(curl -sk -D ${TMP_DIR}/headers --header "X-Vault-Token:${VAULT_TOKEN}" --header "Content-Type:application/json" "$@")
+  local _err_code=$?
+  local _http_code=$(awk 'NR==1 && /^HTTP/ {print $2}' ${TMP_DIR}/headers)
+  local _filter=${JQ_FILTER:-'.'} ; JQ_FILTER=""
+  local _opt=${JQ_OPT:-''} ; JQ_OPT=""
+
+  case "${_http_code}" in
+    200|204) [[ ${_result} ]] && echo ${_result} | jq ${_opt} "${_filter}" || true ;;
+    400) die "Invalid request, missing or invalid data." ;;
+    403) die "Forbidden, your authentication details are either incorrect or you don't have access." ;;
+    404) die "Invalid path. The path doesn't exist or you don't have permission to access it." ;;
+    429) die "Rate limit exceeded. Try again after waiting some period of time." ;;
+    500) die "Internal server error. An internal error has occurred, try again later." ;;
+    503) die "Vault is down for maintenance or is currently sealed. Try again later." ;;
+      *) die "Unknown error: ${_http_code}" ;;
+  esac
+  return 0
+}
+
+case ${cmd} in
+  ###======================================================================
+  #H# list (dir) <key path>
+  dir|list)
+    JQ_FILTER='.data.keys[]?'
+    apiCall "${VAULT_API}${path}?list=true"
+    ;;
+
+  ###======================================================================
+  #H# get (read) <key path>
+  get|read)
+    JQ_FILTER='.data.value?'
+    apiCall "${VAULT_API}${path}"
+    ;;
+
+  ###======================================================================
+  #H# del (drop) <key path>
+  del|drop)
+    apiCall -X DELETE "${VAULT_API}${path}"
+    ;;
+
+  ###======================================================================
+  #H# put (set) <key path> <value>
+  put|set)
+    # The Vault spec does not limit the value length for the generic backend
+    # We'll be more prohibitive here and limit value length to 1024 characters
+    assertLen value 1024
+    cat <<-EOT >"${TMP_DIR}/json"
+	{
+	  "value": "${value}"
+	}
+	EOT
+    apiCall -X POST --data @"${TMP_DIR}/json" "${VAULT_API}${path}"
+    ;;
+
+  ###======================================================================
+  #H# 
+  *) die "unknown command: ${cmd}" ;;
+esac
+
+exit 0

@@ -1,0 +1,332 @@
+#!/usr/bin/env bash
+
+# -------------------------------------------------------------------------------
+#
+#    Copyright (c) 2016 Slava Vladyshevsky. All rights reserved.
+#    Licensed under the MIT License. See LICENSE file in the project root.
+#
+#    Author:  Slava Vladyshevsky <slava.vladyshevsky(a)gmail.com>
+#    Project: DevOps Automation
+#
+#    GitLab CLI management tool
+#
+# -------------------------------------------------------------------------------
+
+### configuration section begin
+set -a
+
+# shell environment may override the default value for this variable
+CLI_HOME=${CLI_HOME:-"/opt/cli"}
+
+# the GITLAB token may be fetched from the secret vault too
+#GITLAB_TOKEN=$(${CLI_HOME}/vault get /secret/cli/gitlab/token)
+
+set +a
+### configuration section end
+
+[[ -f ${CLI_HOME}/cli.lib ]] && . ${CLI_HOME}/cli.lib \
+  || { echo >&2 "cannot load ${CLI_HOME}/cli.lib, exiting"; exit 127; }
+
+if [[ $# -lt 2 ]]; then
+  echo "GitLab CLI management tool"
+  echo "Usage: ./${ME} <object> <action> [<args 1> ... <arg N>]"
+  echo "Objects and actions:"
+  egrep '^[[:space:]]*#H#' ${0} | sed 's/#H#/ /g'
+  exit 0
+fi
+
+obj=${1:-}
+cmd=${2:-}
+shift 2
+
+# checking required variables and tools
+assertVar GITLAB_TOKEN
+assertVar GITLAB_API
+
+command -v jq   &>/dev/null || die "required tool jq is not found, exiting"
+command -v curl &>/dev/null || die "required tool curl is not found, exiting"
+
+# this temporary folder will be removed upon exit or error
+makeTempDir
+
+# by default JQ does not have any parameters
+JQ_OPT=""
+JQ_FILTER=""
+
+function apiCall() {
+  local _result=$(curl -sk -D ${TMP_DIR}/headers --header "PRIVATE-TOKEN:${GITLAB_TOKEN}" --header "Content-Type:application/json" "$@")
+  local _err_code=$?
+  local _err_msg=""
+  local _http_code=$(awk 'NR==1 && /^HTTP/ {print $2}' ${TMP_DIR}/headers)
+  local _filter=${JQ_FILTER:-'.'} ; JQ_FILTER=""
+  local _opt=${JQ_OPT:-''} ; JQ_OPT=""
+
+  # See more details @ http://docs.gitlab.com/ce/api/#status-codes
+  # 200 OK                  The GET, PUT or DELETE request was successful, the resource(s) itself is returned as JSON.
+  # 201 Created             The POST request was successful and the resource is returned as JSON.
+  # 304 Not Modified        Indicates that the resource has not been modified since the last request.
+  # 400 Bad Request         A required attribute of the API request is missing, e.g., the title of an issue is not given.
+  # 401 Unauthorized        The user is not authenticated, a valid user token is necessary.
+  # 403 Forbidden           The request is not allowed, e.g., the user is not allowed to delete a project.
+  # 404 Not Found           A resource could not be accessed, e.g., an ID for a resource could not be found.
+  # 405 Method Not Allowed  The request is not supported.
+  # 409 Conflict            A conflicting resource already exists, e.g., creating a project with a name that already exists.
+  # 422 Unprocessable       The entity could not be processed.
+  # 500 Server Error        While handling the request something went wrong server-side.
+  case "${_http_code}" in
+    200|201) [[ ${_result} ]] && echo ${_result} | jq ${_opt} "${_filter}" || true ;;
+    *) _err_msg=$(echo ${_result} | jq -r '.message?' 2>/dev/null); [[ ${_err_msg} ]] && die ${_err_msg} || die "HTTP Error ${_http_code}" ;;
+  esac
+}
+
+function access_validator ()      { assertLen access 32; }
+function description_validator () { validateString description 256 ' a-zA-Z0-9#_.,:;)(-'; }
+function format_validator ()      { assertLen format 32; }
+function group_validator ()       { validateString group 64 ' a-zA-Z0-9_.-'; }
+function login_validator ()       { validateString login 20 'a-zA-Z0-9_.-';  }
+function mail_validator ()        { validateRegexp mail 64 '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,8}$'; }
+function name_validator ()        { validateString name 32 ' a-zA-Z.-'; }
+function org_validator ()         { validateString org 64 ' a-zA-Z0-9_.-'; }
+function pattern_validator ()     { validateString pattern 64 ' a-zA-Z0-9_.*-'; }
+function project_validator ()     { validateString project 64 'a-zA-Z0-9_.-'; }
+
+case ${obj} in
+  #############################################################################
+  #H# group <list|add|del|users|adduser|deluser> <args...>
+  group)
+    case ${cmd} in
+      ###======================================================================
+      #H# list (dir) [--pattern <pattern>] [--format <list|table>]
+      list|dir)
+        getOptions "pattern:|format:" "$@"
+        case ${format:=list} in
+          list)  JQ_FILTER='.[] | .path' ;;
+          table) JQ_FILTER='def m: {"0":"Private","10":"Internal","20":"Public"}; .[] | [((.id|tostring), m[.visibility_level|tostring], .path, .web_url, .description[0:32])] | join("\t")' ;;
+          *)     die "unknown format \"${format}\"" ;;
+        esac
+
+        JQ_OPT="-r"        
+        [[ ${pattern:-} ]] \
+          && apiCall "${GITLAB_API}/groups?search=${pattern}" \
+          || apiCall "${GITLAB_API}/groups"
+        ;;
+      ###======================================================================
+      #H# add (create) --group <group name> [--description <description>]
+      add|create)
+        getOptions "group|description:" "$@"
+        description="${description:-${group} project group}"
+
+        # creating new GitLab project group with private scope
+        # the visibility level of the group: 0 for private, 10 for internal, 20 for public
+        cat <<-EOT >"${TMP_DIR}/json"
+	{
+	  "name": "${group}",
+	  "path": "${group}",
+	  "description": "${description}",
+	  "visibility_level": 0
+	}
+	EOT
+        apiCall -X POST --data @"${TMP_DIR}/json" "${GITLAB_API}/groups" \
+          && msg "successfully added group \"${group}\""
+        ;;
+      ###======================================================================
+      #H# del (remove) --group <group name>
+      del|remove)
+        getOptions "group" "$@"
+        apiCall -X DELETE "${GITLAB_API}/groups/${group}" \
+          && msg "successfully removed group \"${group}\""
+        ;;
+      ###======================================================================
+      #H# users (members) --group <group name> [--format <list|table>]
+      users|members)
+        getOptions "group|format:" "$@"
+
+        case ${format:=list} in
+          list)  JQ_FILTER='.[] | .username' ;;
+          table) JQ_FILTER='def m: {"10":"Guest","20":"Report","30":"Devel","40":"Master","50":"Owner"}; .[] | [(.state, m[.access_level|tostring], .username, .name)] | join("\t")' ;;
+          *)     die "unknown format \"${format}\"" ;;
+        esac
+
+        JQ_OPT="-r"
+        apiCall "${GITLAB_API}/groups/${group}/members"
+        ;;
+      ###======================================================================
+      #H# adduser (useradd) --group <group name> --login <user login> [--access <guest|reporter|developer|master|owner>]
+      adduser|useradd)
+        getOptions "access:|group|login" "$@"
+        case ${access:=developer} in
+          guest)     level=10 ;;
+          reporter)  level=20 ;;
+          developer) level=30 ;;
+          master)    level=40 ;;
+          owner)     level=50 ;;
+          *)         die "unknown access level \"${access}\"" ;;
+        esac
+
+        user_id=$(JQ_FILTER=".[] | select(.username == \"${login}\") | .id"; JQ_OPT="-r"; apiCall "${GITLAB_API}/users")
+        assertVar user_id "cannot find id for the user \"${login}\""
+
+        # adding group member
+        cat <<-EOT >"${TMP_DIR}/json"
+	{
+	  "user_id": "${user_id}",
+	  "access_level": ${level}
+	}
+	EOT
+        apiCall -X POST --data @"${TMP_DIR}/json" "${GITLAB_API}/groups/${group}/members" \
+          && msg "successfully added user \"${login}\" to the group \"${group}\""
+        ;;
+      ###======================================================================
+      #H# deluser (userdel) --group <group name> --login <user login>
+      deluser|userdel)
+        getOptions "group|login" "$@"
+
+        user_id=$(JQ_FILTER=".[] | select(.username == \"${login}\") | .id"; JQ_OPT="-r"; apiCall "${GITLAB_API}/users")
+        assertVar user_id "cannot find id for the user \"${login}\""
+
+        apiCall -X DELETE "${GITLAB_API}/groups/${group}/members/${user_id}" \
+          && msg "successfully removed user \"${login}\" from the group \"${group}\""
+        ;;
+
+      #H# 
+      *) die "unknown command: ${cmd}" ;;
+    esac ;;
+
+  #############################################################################
+  #H# project <list|add|del> <args...>
+  project)
+    case ${cmd} in
+      ###======================================================================
+      #H# list (dir) [--group <group name>] [--pattern <pattern>] [--format <list|table>]
+      list|dir)
+        getOptions "group:|pattern:|format:" "$@"
+
+        [[ ${group:-} ]] \
+          && api_url="${GITLAB_API}/groups/${group}/projects" \
+          || api_url="${GITLAB_API}/projects/all"
+
+        [[ ${pattern:-} ]] && api_url="${api_url}?search=${pattern}"
+
+        case ${format:=list} in
+          list)  JQ_FILTER='.[] | .name' ;;
+          table) JQ_FILTER='def m: {"0":"Private","10":"Internal","20":"Public"}; .[] | [((.id|tostring), m[.visibility_level|tostring], .path, .last_activity_at, .web_url, .description[0:32])] | join ("    ")' ;;
+          *)     die "unknown format \"${format}\"" ;;
+        esac
+
+        JQ_OPT="-r"
+        apiCall "${api_url}"
+        ;;
+      ###======================================================================
+      #H# add (create) --project <project name> --group <project group> [--description <project description>]
+      add|create)
+        getOptions "project|group|description:|" "$@"
+        description="${description:-${project} web project}"
+
+        group_id=$(JQ_FILTER=".id"; apiCall "${GITLAB_API}/groups/${group}")
+        assertVar group_id "cannot find id for the group \"${group}\""
+
+        if [[ ${clone:-} ]]; then
+          msg "looking up seed project: ${clone}..."
+          clone_id=$(JQ_FILTER=".id" ; apiCall "${GITLAB_API}/projects/${clone//\//%2F}")
+          assertVar clone_id "cannot find id for the clone project \"${clone}\""
+        fi
+
+        # creating new GitLab project with private visibility level
+        # visibility levels:
+        #    0  - Private: project access must be granted explicitly for each user
+        #    10 - Internal: the project can be cloned by any logged in user
+        #    20 - Public: the project can be cloned without any authentication.
+        cat <<-EOT >"${TMP_DIR}/json"
+	{
+	  "name": "${project}",
+	  "path": "${project}",
+	  "description": "${description}",
+	  "namespace_id": "${group_id}",
+	  "visibility_level": 0
+	}
+	EOT
+        apiCall -X POST --data @"${TMP_DIR}/json" "${GITLAB_API}/projects" \
+          && msg "project created successfully"
+        ;;
+      ###======================================================================
+      #H# del (remove) --project <project name> --group <project group>
+      del|remove)
+        getOptions "project|group" "$@"
+
+        proj_id=$(JQ_FILTER=".id" ; apiCall "${GITLAB_API}/projects/${group}%2F${project}")
+        assertVar proj_id "cannot find id for the project \"${project}\" from the group \"${group}\""
+
+        apiCall -X DELETE "${GITLAB_API}/projects/${proj_id}" \
+          && msg "project deletion request submitted successfully"
+        ;;
+      ###======================================================================
+      #H# 
+      *) die "unknown command: ${cmd}" ;;
+    esac ;;
+
+  #############################################################################
+  #H# user <list|add|del> <args...>
+  user)
+    case ${cmd} in
+      ###======================================================================
+      #H# list (dir) [--pattern <pattern>] [--format <list|table>]
+      list|dir)
+        getOptions "pattern:|format:" "$@"
+
+        # filtering and displaying LDAP users only
+        case ${format:=list} in
+          list)  JQ_FILTER='.[] | select(.identities[].provider == "ldapmain") | .username' ;;
+          table) JQ_FILTER='.[] | select(.identities[].provider == "ldapmain") | [((.id|tostring), .state, .username, .name, .email, .identities[].provider, .identities[].extern_uid)] | join ("\t")' ;;
+          *)     die "unknown format \"${format}\"" ;;
+        esac
+
+        JQ_OPT="-r"
+        [[ ${pattern:-} ]] \
+          && apiCall "${GITLAB_API}/users?search=${pattern}" \
+          || apiCall "${GITLAB_API}/users"
+        ;;
+      ###======================================================================
+      #H# add (create) --login <user login> --name <First Last> --mail <email> --org <LDAP org>
+      add|create)
+        assertVar LDAP_EXT
+        getOptions "login|name|mail|org" "$@"
+
+        # creating new GitLab user with AD/LDAP auth provider
+        cat <<-EOT >"${TMP_DIR}/json"
+	{
+	  "username": "${login}",
+	  "name": "${name}",
+	  "password": "$$password$$",
+	  "email": "${mail}",
+	  "provider": "ldapmain",
+	  "extern_uid": "CN=${name},OU=${org},${LDAP_EXT}",
+	  "external": true,
+	  "is_admin": false,
+	  "confirm" : "no",
+	  "can_create_group": false,
+	  "can_create_project": false,
+	  "projects_limit": 0
+	}
+	EOT
+        apiCall -X POST --data @"${TMP_DIR}/json" "${GITLAB_API}/users" \
+          && msg "successfully created user \"${name}\""
+        ;;
+      ###======================================================================
+      #H# del (remove) --login <user login>
+      del|remove)
+        getOptions "login" "$@"
+
+        user_id=$(JQ_FILTER=".[] | select(.username == \"${login}\") | .id"; JQ_OPT="-r"; apiCall "${GITLAB_API}/users")
+        assertVar user_id "cannot find id for the user \"${login}\""
+
+        apiCall -X DELETE "${GITLAB_API}/users/${user_id}" \
+          && msg "successfully removed user \"${login}\""
+        ;;
+
+      ###======================================================================
+      #H# 
+      *) die "unknown command: ${cmd}" ;;
+    esac ;;
+
+  *) die "unknown object: ${obj}" ;;
+esac

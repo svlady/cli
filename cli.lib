@@ -1,0 +1,274 @@
+# -------------------------------------------------------------------------------
+#
+#    Copyright (c) 2016 Slava Vladyshevsky. All rights reserved.
+#    Licensed under the MIT License. See LICENSE file in the project root.
+#
+#    Author:  Slava Vladyshevsky <slava.vladyshevsky(a)gmail.com>
+#    Project: DevOps Automation
+#
+#    Shell library for CLI tools
+#
+# -------------------------------------------------------------------------------
+
+# enabling strict mode http://redsymbol.net/articles/unofficial-bash-strict-mode/
+set -euo pipefail
+IFS=$'\n\t'
+
+# shell environment may override the default value for these variables
+CLI_TEMP=${CLI_TEMP:-"${CLI_HOME}/tmp"}
+
+# current script name
+ME=$(basename $0)
+
+# running verbose by default
+RUN_QUIET=${RUN_QUIET:-}
+
+# by default all user inputs are tested using corresponding validators
+VALIDATE_USER_INPUT=1
+
+# password string length
+PASSWD_LENGTH=16
+
+# the following characters are prohibited in the password:
+# - pipe '|', since we need it for template parsing
+# - square brackets '][', since they mess REGEX parser
+PASSWD_CHARS='a-zA-Z0-9_~!@#$%^/.,:;)(}{=+-'
+
+#
+# Print message to STDERR and stop execution
+#
+function die()
+{
+  printf '\033[31m%s\033[m: %s\n' "${ME}" "$*" >&2
+  exit 1
+}
+
+#
+# Unless RUN_QUIET variable set, print log message to the console
+#
+function msg()
+{
+  # fg: 31 red,  32 green, 33 yellow, 34 blue, 35 purple, 36 cyan, 37 white
+  [[ ${RUN_QUIET} ]] || printf '\033[32m%s\033[m: %s\n' "${ME}" "$*"
+}
+
+#
+# Performs input validation for all parameters provided as array of names.
+# For each parameter named {VAR} the corresponding validator function 
+# {VAR}_validator() is executed. For example the 'name' parameter may 
+# have the following validator defined:
+#
+# function name_validator () { validateString name 32 ' a-zA-Z.-'; }
+#
+function validateInput () {
+  while [[ ${#@} > 0 ]] ; do
+    eval "[[ \${${1%:}:-} || \$1 != *: ]] && {
+      declare -F \${1%:}_validator >/dev/null && \${1%:}_validator \
+      || die \"missing input validator for parameter: \${1%:}\"
+    } || true"
+    shift
+  done
+  return 0
+}
+
+#
+# Parses the command line and retrieves values for the given optional parameters
+# Argument parsing stops at double-dash (--) marker, which may be used for 
+# specifying positional parameters. The global variable OPTINDEX can be used 
+# to skip parsed command line parameters after the function call, e.g.
+#
+#  getOptions "foo|bar" "$@" ; shift ${OPTINDEX}
+#
+# Another global variable VALIDATE_USER_INPUT defines whether to execute
+# the input validators for parsed input parameters.
+#
+function getOptions () {
+  local _var _arg _opt=(${1//|/$'\n'}) _opt_pattern="@(${1//:/})" # the pipe separated list with known options
+  shift
+  shopt -s extglob
+  OPTINDEX=0
+  while [[ ${#@} > 0 ]] ; do
+    [[ $1 == -- ]] && { ((OPTINDEX+=1)); shift 1; break; }
+    [[ $1 != --* ]] && die "unexpected string: $1"
+    _var=${1//-}
+    _arg=${2:-}
+    case "${_var}" in
+      ${_opt_pattern})
+        [[ ${_arg} ]] && eval ${_var}=\'${_arg}\' || die "the option '${_var}' is missing value"
+        ((OPTINDEX+=2))
+        shift 2
+        ;;
+      *) die "unknown option: $1" ;;
+    esac
+  done
+  shopt -u extglob
+
+  # executing input validators
+  [[ ${VALIDATE_USER_INPUT} ]] && validateInput ${_opt[*]}
+  return 0
+}
+
+#
+# Print error message and stop execution if the given variable is empty
+#
+function assertVar() {
+  local _var=${1:-} # ${1}: VAR name
+  local _msg=${2:-} # ${2}: optional error message
+  
+  # if error message is not provided, using default one
+  [[ ${_msg} ]] || _msg="the ${_var} is not defined, exiting..."
+  eval [[ \${${_var}:-} ]] || die "${_msg}"
+  return 0
+}
+
+#
+# Print error message and stop execution if the size of the given variable content
+# is exceeding allowed value
+#
+function assertLen() {
+  local _var=${1:-} # ${1}: VAR name
+  local _len=${2:-} # ${2}: maximum allowed size
+  local _msg=${3:-} # ${3}: optional error message
+
+  # if error message is not provided, using default one
+  [[ ${_msg} ]] || _msg="the ${_var} length must be less than ${_len} characters, exiting..."
+
+  eval [[ \${#${_var}} -lt ${_len} ]] || die "${_msg}"
+  return 0
+}
+
+#
+# Print error message and stop execution if the given variable
+# contains other than allowed characters
+#
+function assertChr() {
+  local _var=${1:-} # ${1}: VAR name
+  local _chr=${2:-} # ${2}: allowed chars
+  local _msg=${3:-} # ${3}: optional error message
+
+  # if error message is not provided, using default one
+  [[ ${_msg} ]] || _msg="the ${_var} can only contain ${_chr} characters, exiting..."
+
+  eval [[ \${${_var}} =~ [^${_chr}] ]] && die "${_msg}"
+  return 0
+}
+
+#
+# Print error message and stop execution if given variable does not pass the 
+# following tests:
+#  - the variable is not empty
+#  - the size of the given variable content is exceeding allowed value
+#  - the variable contains other than allowed characters
+#
+function validateString () {
+  local _var=${1:-} # ${1}: VAR name
+  local _len=${2:-} # ${2}: maximum allowed size
+  local _chr=${3:-} # ${3}: allowed chars
+
+  eval [[ \${${_var}:-} ]] || die "the ${_var} is not defined, exiting..."
+  eval [[ \${#${_var}} -lt ${_len} ]] || die "the ${_var} length must be less than ${_len} characters, exiting..."
+  eval local _bad_chars=\${${_var}//'[${_chr}]'}
+  [[ ${_bad_chars} ]] && die "the ${_var} contains bad character(s) \"${_bad_chars}\", it can only contain \"${_chr}\" characters, exiting..."
+  return 0
+}
+
+#
+# Print error message and stop execution if given variable does not pass the 
+# following tests:
+#  - the variable is not empty
+#  - the size of the given variable content is exceeding allowed value
+#  - the variable contains other than allowed characters
+#
+function validateRegexp () {
+  local _var=${1:-} # ${1}: VAR name
+  local _len=${2:-} # ${2}: maximum allowed size
+  local _rex=${3:-} # ${3}: regular expression to test
+
+  eval [[ \${${_var}:-} ]] || die "the ${_var} is not defined, exiting..."
+  eval [[ \${#${_var}} -lt ${_len} ]] || die "the ${_var} length must be less than ${_len} characters, exiting..."
+  eval [[ \${${_var}} =~ ${_rex} ]] || die "the ${_var} has wrong format, exiting..."
+  return 0
+}
+
+
+#
+# Create folder with the given path, unless it's already present.
+# Optionally set given permissions and owner for the folder.
+#
+function ensureDir()
+{
+  local _dir_name=${1:-}
+  local _dir_mode=${2:-}
+  local _dir_owner=${3:-}
+  local _opt=""
+
+  [[ ${_dir_name} ]] || die "missing directory name"
+
+  [[ -d ${_dir_name} ]] || {
+    msg "folder ${_dir_name} not found, creating"
+    mkdir -p "${_dir_name}" || die "cannot create \"${_dir_name}\""
+  }
+  
+  [[ ${_dir_name} == */ ]] && _opt="--recursive"
+  [[ ${_dir_mode}  ]] && chmod ${_opt} ${_dir_mode}  "${_dir_name}"
+  [[ ${_dir_owner} ]] && chown ${_opt} ${_dir_owner} "${_dir_name}"
+  return 0
+}
+
+#
+# Generate password string
+#
+function generatePassword() {
+  local _len=${1:-${PASSWD_LENGTH}} # ${1}: length, if not provided, the global setting PASSWORD_LENGTH is used instead
+  local _chr=${2:-${PASSWD_CHARS}}  # ${2}: charset, if not provided, the global setting PASSWORD_CHARS is used instead
+  tr -dc ${_chr} < /dev/urandom | head -c ${_len} | xargs
+  return 0
+}
+
+#
+# Make temporary folder and register clean-up function
+# Sets the following global variables:
+#   TMP_DIR - temporary folder on the host file-system
+#   TMP_VOL - temporary folder that will be mounted as container volume
+#
+function makeTempDir () {
+  ensureDir ${CLI_TEMP}
+
+  TMP_DIR=$(mktemp -d -p ${CLI_TEMP})
+  TMP_VOL=/tmp/${TMP_DIR##*/}
+
+  # if user namespaces used, setting ownership accordingly
+  if [[ ${DCROOT_GROUP:-} ]]; then
+    chmod g=rwx ${TMP_DIR}
+    chown :${DCROOT_GROUP} ${TMP_DIR}
+  fi
+
+  # register the cleanup function to be called for the given signals
+  trap "rm -rf ${TMP_DIR}" EXIT SIGHUP SIGINT SIGQUIT SIGTERM
+  return 0
+}
+
+#
+# Encode unsafe characters in URL
+#
+urlEncode() {
+  local length="${#1}"
+  for (( i = 0; i < length; i++ )); do
+      local c="${1:i:1}"
+      case $c in
+          [a-zA-Z0-9.~_-]) printf "$c" ;;
+          *) printf '%%%02X' "'$c"
+      esac
+  done
+  return 0
+}
+
+#
+# Returns a string in which the sequences with percent (%) signs followed by
+# two hex digits have been replaced with literal characters.
+#
+urlDecode() {
+  local url_encoded="${1//+/ }"
+  printf '%b' "${url_encoded//%/\\x}"
+  return 0
+}

@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+
+# -------------------------------------------------------------------------------
+#
+#    Copyright (c) 2016 Slava Vladyshevsky. All rights reserved.
+#    Licensed under the MIT License. See LICENSE file in the project root.
+#
+#    Author:  Slava Vladyshevsky <slava.vladyshevsky(a)gmail.com>
+#    Project: DevOps Automation
+#
+#    Bash auto-completion for the sonar tool
+#
+# -------------------------------------------------------------------------------
+
+# see https://www.gnu.org/software/bash/manual/html_node/Programmable-Completion-Builtins.html
+# $1: is the name of the command whose arguments are being completed
+# $2: is the word being completed, equal to ${COMP_WORDS[COMP_CWORD]}
+# $3: is the word preceding the word being completed, equal to ${COMP_WORDS[COMP_CWORD-1]}
+_comp_sonar() {
+  # the basic CLI objects
+  local objects="group template"
+  local args=""
+  COMPREPLY=()
+
+  if [[ "${1} ${objects}" =~ ${3} ]] ; then
+    case "${3}" in
+      group)        args="list dir add create del remove" ;;
+      template)     args="list dir add create del remove groups addgroup delgroup permissions" ;;
+      ${1})         args=${objects} ;;
+      *) return 0 ;;
+    esac
+  else
+    case "${COMP_WORDS[1]}-${COMP_WORDS[2]}" in
+      group-list|group-dir)          args="--pattern --format" ;;
+      group-add|group-create)        args="--group --description" ;;
+      group-del|group-remove)        args="--group --gid" ;;
+      project-list|project-dir)      args="--key --pattern" ;;
+      project-del|project-remove)    args="--key" ;;
+      template-list|template-dir)    args="--pattern --format" ;;
+      template-add|template-create)  args="--template --key --description" ;;
+      template-del|template-remove)  args="--template --tid" ;;
+      template-groups)               args="--template --tid --permission" ;;
+      template-addgroup)             args="--template --group --permission" ;;
+      template-delgroup)             args="--template --group --permission" ;;
+      *) return 0 ;;
+    esac
+  fi
+
+  # complete the choice for some of the common arguments
+  if [[ ${3} == --* ]] ; then
+    local IFS=$'\n\t'
+    case "${3}" in
+      --permission) args=$'user\tadmin\tissueadmin\tcodeviewer\tscan' ;;
+      --format) args=$'list\ttable' ;;
+      *) return 0 ;;
+    esac
+    COMPREPLY=($(compgen -W "${args[*]}" -- ${2}))
+    # escaping spaces and other unsafe characters
+    COMPREPLY=($(printf "%q\n" "${COMPREPLY[@]}"))
+    return 0
+  fi
+
+  COMPREPLY=($(compgen -W "${args[*]}" -- ${2}))
+  return 0
+}
+
+complete -F _comp_sonar sonar

@@ -1,0 +1,12 @@
+# configurations and settings
+*.env
+
+# temp folders
+tmp
+*.log
+
+# OS generated files #
+.DS_Store*
+ehthumbs.db
+Icon\?
+Thumbs.db

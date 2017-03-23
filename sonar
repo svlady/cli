@@ -1,0 +1,352 @@
+#!/usr/bin/env bash
+
+# -------------------------------------------------------------------------------
+#
+#    Copyright (c) 2016 Slava Vladyshevsky. All rights reserved.
+#    Licensed under the MIT License. See LICENSE file in the project root.
+#
+#    Author:  Slava Vladyshevsky <slava.vladyshevsky(a)gmail.com>
+#    Project: DevOps Automation
+#
+#    SonarQube CLI tool for managing projects and permissions
+#
+# -------------------------------------------------------------------------------
+
+### configuration section begin
+set -a
+
+# shell environment may override the default value for this variable
+CLI_HOME=${CLI_HOME:-"/opt/cli"}
+
+# the SONAR token may be fetched from the secret vault too
+#SONAR_TOKEN=$(${CLI_HOME}/vault get /secret/cli/sonar/token)
+
+set +a
+### configuration section end
+
+[[ -f ${CLI_HOME}/cli.lib ]] && . ${CLI_HOME}/cli.lib \
+  || { echo >&2 "cannot load ${CLI_HOME}/cli.lib, exiting"; exit 127; }
+
+if [[ $# -lt 2 ]]; then
+  echo "SonarQube CLI tool for managing projects and permissions"
+  echo "Usage: ./${ME} <object> <action> [<args 1> ... <arg N>]"
+  echo "Objects and actions:"
+  egrep '^[[:space:]]*#H#' ${0} | sed 's/#H#/ /g'
+  exit 0
+fi
+
+obj=${1:-}
+cmd=${2:-}
+shift 2
+
+# checking required variables and tools
+assertVar SONAR_TOKEN
+assertVar SONAR_URL
+
+command -v jq   &>/dev/null || die "required tool jq is not found, exiting"
+command -v curl &>/dev/null || die "required tool curl is not found, exiting"
+
+# this temporary folder will be removed upon exit or error
+makeTempDir
+
+JQ_OPT=""
+JQ_FILTER=""
+
+function apiCall() {
+  local _result=$(curl -sk -D ${TMP_DIR}/headers --user "${SONAR_TOKEN}:" --header "Content-Type:application/json" "$@")
+  local _err_code=$?
+  local _err_msg=""
+  local _http_code=$(awk 'NR==1 && /^HTTP/ {print $2}' ${TMP_DIR}/headers)
+  local _filter=${JQ_FILTER:-'.'} ; JQ_FILTER=""
+  local _opt=${JQ_OPT:-''} ; JQ_OPT=""
+
+  # See more details @ http://docs.sonarqube.org/display/SONARQUBE43/Web+Service+API
+  # 200 OK
+  # 400 Bad request. The request could not be understood by the server due to malformed syntax.
+  # 401 Unauthorized
+  # 403 Forbidden. The request was a legal request, but the server is refusing to respond to it.
+  # 404 The requested resource could not be found.
+  # 500 Internal server error.
+  case "${_http_code}" in
+    20?) [[ ${_result} ]] && echo ${_result} | jq ${_opt} "${_filter}" || true ;;
+    *) _err_msg=$(echo ${_result} | ${JQ} -r '.errors[]? | .msg?' 2>/dev/null); [[ ${_err_msg} ]] && die ${_err_msg} || die "HTTP Error ${_http_code}" ;;
+  esac
+}
+
+function description_validator () { validateString description 256 ' a-zA-Z0-9#_.,:;)(-'; }
+function format_validator ()      { assertLen format 32; }
+function gid_validator ()         { validateString gid 8 '0-9'; }
+function group_validator ()       { validateString group 64 ' a-zA-Z0-9_.-'; }
+function key_validator ()         { validateString key 64 'a-zA-Z0-9_.:*-'; }
+function pattern_validator ()     { validateString pattern 64 ' a-zA-Z0-9_.*-'; }
+function permission_validator ()  { assertLen permission 32; }
+function keys_validator ()        { validateRegexp pids 256 '^([a-zA-Z0-9_.:-]+,)*([a-zA-Z0-9_.:-]+)$'; }
+function template_validator ()    { validateString template 64 ' a-zA-Z0-9_.-'; }
+function tid_validator ()         { validateString tid 32 'a-zA-Z0-9_.-'; }
+
+case ${obj} in
+  #############################################################################
+  #H# group <list|add|del> <args...>
+  group)
+    case ${cmd} in
+      ###======================================================================
+      #H# list (dir) [--pattern <pattern>] [--format <list|table>]
+      list|dir)
+        getOptions "pattern:|format:" "$@"
+        case ${format:=list} in
+          list)  JQ_FILTER='.groups[] | .name' ;;
+          table) JQ_FILTER='.groups[] | [(.id, .name, .memberCount, .description[0:32])] | join("\t")' ;;
+          *)     die "unknown format \"${format}\"" ;;
+        esac
+
+        JQ_OPT="-r"        
+        [[ ${pattern:-} ]] \
+          && apiCall "${SONAR_URL}/api/user_groups/search?q=${pattern}" \
+          || apiCall "${SONAR_URL}/api/user_groups/search"
+        ;;
+
+      ###======================================================================
+      #H# add (create) --group <group name> [--description <description>]
+      add|create)
+        getOptions "group|description:" "$@"
+        description="${description:-${group} project group}"
+
+        # creating new project group with private scope
+        cat <<-EOT >"${TMP_DIR}/json"
+	{
+	  "name": "${group}",
+	  "description": "${description}"
+	}
+	EOT
+        apiCall -X POST --data @"${TMP_DIR}/json" "${SONAR_URL}/api/user_groups/create" \
+          && msg "successfully added group \"${group}\""
+        ;;
+
+      ###======================================================================
+      #H# del (remove) --group <group name> | --gid <group id>
+      del|remove)
+        getOptions "gid:|group:" "$@"
+
+        if [[ ${group:-} ]]; then
+          cat <<-EOT >"${TMP_DIR}/json"
+	{
+	  "name": "${group}"
+	}
+	EOT
+        elif [[ ${gid:-} ]]; then
+          cat <<-EOT >"${TMP_DIR}/json"
+	{
+	  "id": "${gid}"
+	}
+	EOT
+        else
+          die "either group id or name must be provided"
+        fi
+
+        apiCall -X POST --data @"${TMP_DIR}/json" "${SONAR_URL}/api/user_groups/delete" \
+          && msg "successfully removed group"
+        ;;
+
+        ###======================================================================
+        #H# 
+        *) die "unknown command: ${cmd}" ;;
+      esac ;;
+
+  #############################################################################
+  #H# project <list|del> <args...>
+  project)
+    case ${cmd} in
+      ###======================================================================
+      #H# list (dir) [--key <project key prefix>] [--pattern <pattern>]
+      list|dir)
+        getOptions "key:|pattern:|format:" "$@"
+
+        JQ_OPT="-r"
+        if [[ ${key:-} ]]; then
+          JQ_FILTER=".[] | select(.k | startswith(\"${key:-}\")) | .k"
+        else
+          JQ_FILTER=".[] | .k"
+        fi
+
+        [[ ${pattern:-} ]] \
+          && apiCall "${SONAR_URL}/api/projects/index?search=${pattern}" \
+          || apiCall "${SONAR_URL}/api/projects/index"
+        ;;
+
+      ###======================================================================
+      #H# del (remove) --key <project key prefix> 
+      del|remove)
+        getOptions "key" "$@"
+
+        if [[ ${key:-} ]]; then
+          keys=$(JQ_OPT="-r"; JQ_FILTER="map(select(.k | startswith(\"${key:-}\"))) | map(.k) | join(\",\")"; apiCall "${SONAR_URL}/api/projects/index")
+        fi
+
+        if [[ ${keys} ]]; then
+          msg "removing project(s) matching key prefix \"${key}\": ${keys}"
+
+          cat <<-EOT >"${TMP_DIR}/json"
+	{
+	  "keys": "${keys}"
+	}
+	EOT
+
+          apiCall -X POST --data @"${TMP_DIR}/json" "${SONAR_URL}/api/projects/bulk_delete" \
+            && msg "projects deleted successfully"
+        else
+          msg "cannot find projects matching key prefix \"${key}\""
+        fi
+        ;;
+
+      ###======================================================================
+      #H# 
+      *) die "unknown command: ${cmd}" ;;
+    esac ;;
+
+  #############################################################################
+  #H# template <list|add|del|groups|addgroup|delgroup|permissions> <args...>
+  template)
+    case ${cmd} in
+      ###======================================================================
+      #H# list (dir) [--pattern <pattern>] [--format <list|table>]
+      list|dir)
+        getOptions "pattern:|format:" "$@"
+
+        case ${format:=list} in
+          list)  JQ_FILTER='.permissionTemplates[] | .name' ;;
+          table) JQ_FILTER='.permissionTemplates[] | [(.id, .projectKeyPattern, .name, .description[0:32])] | join("\t")' ;;
+          *)     die "unknown format \"${format}\"" ;;
+        esac
+
+        JQ_OPT="-r"        
+        [[ ${pattern:-} ]] \
+          && apiCall "${SONAR_URL}/api/permissions/search_templates?q=${pattern}" \
+          || apiCall "${SONAR_URL}/api/permissions/search_templates"
+        ;;
+
+      ###======================================================================
+      #H# add (create) --template <template name> --key <project pattern> [--description <project description>]
+      add|create)
+        getOptions "template|key|description:" "$@"
+        description="${description:-${template} permissions}"
+
+        # creating new sonar permission template 
+        cat <<-EOT >"${TMP_DIR}/json"
+	{
+	  "name": "${template}",
+	  "description": "${description}",
+	  "projectKeyPattern": "${key}"
+	}
+	EOT
+        apiCall -X POST --data @"${TMP_DIR}/json" "${SONAR_URL}/api/permissions/create_template" \
+          && msg "permission template created successfully"
+        ;;
+      ###======================================================================
+      #H# del (remove) --template <template name> | --tid <template id>
+      del|remove)
+        getOptions "tid:|template:" "$@"
+
+        if [[ ${template:-} ]]; then
+          cat <<-EOT >"${TMP_DIR}/json"
+	{
+	  "templateName": "${template}"
+	}
+	EOT
+        elif [[ ${tid:-} ]]; then
+          cat <<-EOT >"${TMP_DIR}/json"
+	{
+	  "templateId": "${tid}"
+	}
+	EOT
+        else
+          die "either template id or name must be provided"
+        fi
+
+        apiCall -X POST --data @"${TMP_DIR}/json" "${SONAR_URL}/api/permissions/delete_template" \
+          && msg "successfully removed template"
+        ;;
+
+      ###======================================================================
+      #H# groups --template <template name> | --tid <template id> --permission <user, admin, issueadmin, codeviewer, scan>
+      groups)
+        getOptions "template:|tid:|permission" "$@"
+
+        if [[ ${template:-} ]]; then
+          arg="templateName=$(urlEncode ${template})"
+        elif [[ ${tid:-} ]]; then
+          arg="templateId=${tid}"
+        else
+          die "either template id or name must be provided"
+        fi
+
+        case ${permission} in
+          user|admin|issueadmin|codeviewer|scan) ;;
+          *)  die "unknown permission \"${permission}\"" ;;
+        esac
+
+        JQ_OPT="-r"
+        JQ_FILTER='.groups[] | .name'
+        # querying group-wide permissions for the template 
+        apiCall "${SONAR_URL}/api/permissions/template_groups?permission=${permission}&${arg}"
+        ;;
+
+      ###======================================================================
+      #H# addgroup --template <template name> --group <group name> --permission <user, admin, issueadmin, codeviewer, scan>
+      addgroup)
+        getOptions "template|group|permission" "$@"
+
+        case ${permission} in
+          user|admin|issueadmin|codeviewer|scan) ;;
+          *)  die "unknown permission \"${permission}\"" ;;
+        esac
+
+        # adding group-wide permission to the template 
+        cat <<-EOT >"${TMP_DIR}/json"
+	{
+	  "templateName": "${template}",
+	  "groupName": "${group}",
+	  "permission": "${permission}"
+	}
+	EOT
+        apiCall -X POST --data @"${TMP_DIR}/json" "${SONAR_URL}/api/permissions/add_group_to_template" \
+          && msg "permission template updated successfully"
+        ;;
+
+      ###======================================================================
+      #H# delgroup --template <template name> --group <group name> --permission <user, admin, issueadmin, codeviewer, scan>
+      delgroup)
+        getOptions "template|group|permission" "$@"
+
+        case ${permission} in
+          user|admin|issueadmin|codeviewer|scan) ;;
+          *)  die "unknown permission \"${permission}\"" ;;
+        esac
+
+        # removing group-wide permission from the template 
+        cat <<-EOT >"${TMP_DIR}/json"
+	{
+	  "templateName": "${template}",
+	  "groupName": "${group}",
+	  "permission": "${permission}"
+	}
+	EOT
+
+        apiCall -X POST --data @"${TMP_DIR}/json" "${SONAR_URL}/api/permissions/remove_group_from_template" \
+          && msg "permission template updated successfully"
+        ;;
+
+      ###======================================================================
+      #H# permissions
+      permissions)
+        # getOptions "template|group|permission" "$@"
+
+        JQ_FILTER='.permissions[]'
+        apiCall -X POST --data @"${TMP_DIR}/json" "${SONAR_URL}/api/permissions/search_templates"
+        ;;
+
+      ###======================================================================
+      #H# 
+      *) die "unknown command: ${cmd}" ;;
+    esac ;;
+  *) die "unknown object: ${obj}" ;;
+esac

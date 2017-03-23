@@ -1,0 +1,308 @@
+#!/usr/bin/env bash
+
+# -------------------------------------------------------------------------------
+#
+#    Copyright (c) 2016 Slava Vladyshevsky. All rights reserved.
+#    Licensed under the MIT License. See LICENSE file in the project root.
+#
+#    Author:  Slava Vladyshevsky <slava.vladyshevsky(a)gmail.com>
+#    Project: DevOps Automation
+#
+#    LDAP/Active Directory CLI management tool
+#
+# -------------------------------------------------------------------------------
+
+### configuration section begin
+set -a
+
+# shell environment may override the default value for this variable
+CLI_HOME=${CLI_HOME:-"/opt/cli"}
+
+set +a
+### configuration section end
+
+[[ -f ${CLI_HOME}/cli.lib ]] && . ${CLI_HOME}/cli.lib \
+  || { echo >&2 "cannot load ${CLI_HOME}/cli.lib, exiting"; exit 127; }
+
+if [[ $# -lt 2 ]]; then
+  echo "LDAP/AD CLI management tool"
+  echo "Usage: ./${ME} <object> <action> [<args 1> ... <arg N>]"
+  echo "Objects and actions:"
+  egrep '^[[:space:]]*#H#' ${0} | sed 's/#H#/ /g'
+  exit 0
+fi
+
+obj=${1:-}
+cmd=${2:-}
+shift 2
+
+# this temporary folder will be removed upon exit or error
+makeTempDir
+
+# the LDAP credentials may be fetched from the secret vault too
+#LDAP_BINDDN=$(${CLI_HOME}/vault get /secret/cli/ldap/binddn)
+#${CLI_HOME}/vault get /secret/poc/ldap/bindpw > ${TMP_DIR}/bindpw
+echo "${LDAP_BINDPW}" > ${TMP_DIR}/bindpw
+
+# checking required variables and tools
+assertVar LDAP_BINDDN
+assertVar LDAP_BINDPW
+assertVar LDAP_URI
+assertVar LDAP_BASE
+assertVar LDAP_EXT
+
+command -v adtool &>/dev/null || die "required tool adtool is not found, exiting"
+
+function attr_validator ()      { validateString attr 64 'a-zA-Z0-9_.-'; }
+function container_validator () { validateString container  64 ' a-zA-Z0-9_.-'; }
+function first_validator ()     { validateString first 32 'a-zA-Z0-9-'; }
+function format_validator ()    { assertLen format 32; } 
+function group_validator ()     { validateString group 64 ' a-zA-Z0-9_.-'; }
+function last_validator ()      { validateString last 32 'a-zA-Z0-9-'; }
+function login_validator ()     { validateString login 20 'a-zA-Z0-9_.-'; }
+function mail_validator ()      { validateRegexp mail 64 '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,8}$'; }
+function name_validator ()      { validateString name 64 ' a-zA-Z0-9-'; }
+function org_validator ()       { validateString org 64 ' a-zA-Z0-9_.-'; }
+function password_validator ()  { validateString password 16 'a-zA-Z0-9_~!@#$%^/.,:;)(}{=+-'; }
+function pattern_validator ()   { validateString pattern 64 ' a-zA-Z0-9_.-*'; }
+function value_validator ()     { assertLen value 256; }
+
+function adcmd() {
+  BASE="${BASE:-$LDAP_BASE}"
+  adtool -H "${LDAP_URI}" -b "${BASE}" -D "${LDAP_BINDDN}" -w $(<${TMP_DIR}/bindpw) "$@" >${TMP_DIR}/out
+  [[ ${FORMAT:-} ]] && sed ${FORMAT} ${TMP_DIR}/out || cat ${TMP_DIR}/out
+}
+
+case ${obj} in
+  #############################################################################
+  #H# group <list|add|del|users|adduser|deluser> <args...>
+  group)
+    case ${cmd} in
+      ###======================================================================
+      #H# list (dir)   [--org <org name>] [--format <short|long>]
+      list|dir)
+        getOptions "org:|format:" "$@"
+
+        case ${format:=short} in
+          long)  FORMAT='' ;;
+          short) FORMAT='s/^..=\([^,]*\),.*$/\1/' ;;
+          *)     die "unknown format \"${format}\"" ;;
+        esac
+
+        [[ ${org:-} ]] && BASE="OU=${org},${LDAP_EXT}" || BASE="${LDAP_BASE}"
+        adcmd search objectclass group
+        ;;
+
+      ###======================================================================
+      #H# add (create) [--org <org name>] --group <group name>
+      add|create)
+        getOptions "org:|group" "$@"
+
+        [[ ${org:-} ]] && BASE="OU=${org},${LDAP_EXT}" || BASE="${LDAP_BASE}"
+        adcmd groupcreate "${group}" "CN=Groups,${BASE}"
+        msg "successfully added group \"${group}\""
+        ;;
+
+      ###======================================================================
+      #H# del (remove) [--org <org name>] --group <group name>
+      del|remove)
+        getOptions "org:|group" "$@"
+
+        [[ ${org:-} ]] && BASE="OU=${org},${LDAP_EXT}" || BASE="${LDAP_BASE}"
+        adcmd groupdelete "${group}"
+        msg "successfully deleted group \"${group}\""
+        ;;
+
+      ###======================================================================
+      #H# users (members)   --group <group name> [--format <short|long>]
+      users|members)
+        getOptions "group|format:" "$@"
+
+        case ${format:=short} in
+          long)  FORMAT='' ;;
+          short) FORMAT='s/^..=\([^,]*\),.*$/\1/' ;;
+          *)     die "unknown format \"${format}\"" ;;
+        esac
+
+        adcmd attributeget "${group}" member 2>/dev/null || true
+        ;;
+
+      ###======================================================================
+      #H# adduser (useradd) --group <group name> --org <org name> --name <user name>
+      adduser|useradd)
+        getOptions "group|org|name" "$@"
+
+        adcmd groupadduser "${group}" "${name}" "CN=Users,OU=${org},${LDAP_EXT}"
+        msg "successfully added user \"${org}/${name}\" to the group \"${group}\""
+        ;;
+
+      ###======================================================================
+      #H# deluser (userdel) --group <group name> --org <org name> --name <user name>
+      deluser|userdel)
+        getOptions "group|org|name" "$@"
+
+        adcmd groupremoveuser "${group}" "${name}" "CN=Users,OU=${org},${LDAP_EXT}"
+        msg "successfully removed user \"${org}/${name}\" from the group \"${group}\""
+        ;;
+
+      ###======================================================================
+      #H# 
+      *) die "unknown command: ${cmd}" ;;
+    esac ;;
+
+  #############################################################################
+  #H# org <list|add|del> <args...>
+  org)
+    case ${cmd} in
+      ###======================================================================
+      #H# list (dir) [--pattern <pattern *>] [--format <short|long>]
+      list|dir)
+        getOptions "pattern:|format:" "$@"
+
+        case ${format:=short} in
+          long)  FORMAT='' ;;
+          short) FORMAT='s/^..=\([^,]*\),.*$/\1/' ;;
+          *)     die "unknown format \"${format}\"" ;;
+        esac
+
+        if [[ ${pattern:-} ]]; then
+          adcmd search OU "${pattern}"
+        else
+          adcmd list "${LDAP_EXT}"
+        fi
+        ;;
+
+      ###======================================================================
+      #H# add (create) --org <org name>
+      add|create)
+        getOptions "org" "$@"
+
+        adcmd oucreate "${org}" "${LDAP_EXT}"
+        msg "successfully added organization \"${org}\""
+
+        # creating the underling OU structure
+        for name in "Users" "Groups" "Service Accounts"; do
+          adcmd containercreate "${name}" "OU=${org},${LDAP_EXT}"
+          msg "successfully added container \"${org}/${name}\""
+        done
+        ;;
+
+      ###======================================================================
+      #H# del (remove) --org <org name>
+      del|remove)
+        getOptions "org" "$@"
+        BASE="OU=${org},${LDAP_EXT}"
+
+        # removing the underling OU structure
+        for name in "Users" "Groups" "Service Accounts"; do
+          [[ $(adcmd list "CN=${name},OU=${org},${LDAP_EXT}") ]] && die "container \"${org}/${name}\" is not empty"
+          adcmd containerdelete "${name}"
+          msg "successfully deleted container \"${org}/${name}\""
+        done
+        BASE="${LDAP_EXT}"
+        [[ $(adcmd list "OU=${org},${LDAP_EXT}") ]] && die "organization \"${org}\" is not empty"
+        adcmd oudelete "${org}"
+        msg "successfully deleted organization \"${org}\""
+        ;;
+
+      ###======================================================================    
+      #H# 
+      *) die "unknown command: ${cmd}" ;;
+    esac ;;
+
+  #############################################################################
+  #H# user <list|add|del> <args...>
+  user)
+    case ${cmd} in
+      ###======================================================================
+      #H# groups (memberof) [--org <org name>] --name <user name> [--format <short|long>]
+      groups|memberof)
+        getOptions "org:|name|format:" "$@"
+
+        case ${format:=short} in
+          long)  FORMAT='' ;;
+          short) FORMAT='s/^..=\([^,]*\),.*$/\1/' ;;
+          *)     die "unknown format \"${format}\"" ;;
+        esac
+
+        [[ ${org:-} ]] && BASE="OU=${org},${LDAP_EXT}" || BASE="${LDAP_BASE}"
+        adcmd attributeget "${name}" memberOf 2>/dev/null || true
+        ;;
+
+      ###======================================================================
+      #H# list (dir)   [--org <org name>] [--container <container>] [--format <short|long>]
+      list|dir)
+        getOptions "org:|container:|pattern:|format:" "$@"
+
+        case ${format:=short} in
+          long)  FORMAT='' ;;
+          short) FORMAT='s/^..=\([^,]*\),.*$/\1/' ;;
+          *)     die "unknown format \"${format}\"" ;;
+        esac
+
+        [[ ${org:-} ]] && BASE="OU=${org},${LDAP_EXT}" || BASE="${LDAP_BASE}"
+        BASE="CN=${container:-Users},${BASE}"
+        adcmd search objectClass "user"
+        ;;
+
+      ###======================================================================
+      #H# add (create) [--org <org name>] [--container <container>] --first <first name> --last <last name>
+      #H#              --login <login name> --mail <email> --password <password>
+      add|create)
+        getOptions "org:|container:|first|last|login|mail|password" "$@"
+
+        [[ ${org:-} ]] && BASE="OU=${org},${LDAP_EXT}" || BASE="${LDAP_BASE}"
+        [[ $(adcmd search userPrincipalName ${login}) ]] && die "the user with login \"${login}\" already exists"
+
+        name="${first} ${last}"
+
+        # Create and rename because "Name Length Limits from the Schema":
+        # backward compatibility the limit is 20 characters for login name.
+        # http://technet.microsoft.com/en-us/library/active-directory-maximum-limits-scalability%28v=ws.10%29.aspx
+        adcmd usercreate ${login} "CN=${container:-Users},${BASE}"
+        msg "successfully added user ${login} : \"${name}\""
+
+        adcmd userrename ${login} "${name}"
+        adcmd setpass "${name}" "${password}" && msg "set password for user \"${name}\""
+        adcmd userunlock "${name}" && msg "unlocked user \"${name}\""
+
+        msg "setting AD attributes for user \"${name}\""
+        adcmd attributereplace "${name}" userPrincipalName "${login}"
+        adcmd attributereplace "${name}" sAMAccountName "${login}"
+        adcmd attributereplace "${name}" mail "${mail}"
+        adcmd attributereplace "${name}" givenName "${first}"
+        adcmd attributereplace "${name}" sn "${last}"
+        adcmd attributereplace "${name}" displayName "${name}"
+        ;;
+
+      ###======================================================================
+      #H# del (remove) [--org <org name>] --name <user name>
+      del|remove)
+        getOptions "org:|name" "$@"
+
+        [[ ${org:-} ]] && BASE="OU=${org},${LDAP_EXT}" || BASE="${LDAP_BASE}"
+        adcmd userdelete "${name}"
+        msg "successfully deleted user \"${name}\""
+        ;;
+
+      ###======================================================================
+      #H# getattr --org <org name> --name <user name> --attr <attribute name>
+      getattr)
+        getOptions "org|name|attr" "$@"
+        adcmd attributeget "${name}" ${attr}
+        ;;
+
+      ###======================================================================
+      #H# setattr --org <org name> --name <user name> --attr <attribute name> --value <attr value>
+      setattr)
+        getOptions "org|name|attr|value" "$@"
+        adcmd attributereplace "${name}" ${attr} "${value}" 
+        ;;
+
+      ###======================================================================  
+      #H#
+      *) die "unknown command: ${cmd}" ;;
+    esac ;;
+
+  *) die "unknown object: ${obj}" ;;
+esac
