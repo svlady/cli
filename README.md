@@ -1,4 +1,4 @@
-![CLI Tools](https://github.com/svlady/cli/raw/master/doc/logo-cli.png)
+![CLI Tools](https://raw.githubusercontent.com/svlady/cli/master/doc/cli-logo.png)
 
 This project contains CLI tools enabling automation, scripting and programmatic management for such applications as [GitLab](https://about.gitlab.com/), [SonarQube](https://www.sonarqube.org/), [MS Active Directory](https://msdn.microsoft.com/en-us/library/cc223122.aspx), [HashiCorp Vault](https://www.vaultproject.io/), etc. These CLI tools are operating on _objects_ and calling certain _actions_ for those objects, taking user inputs as parameters. Each CLI tool is performing the following basic tasks:
 
