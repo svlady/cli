@@ -1,6 +1,6 @@
 ![CLI Tools](https://raw.githubusercontent.com/svlady/cli/master/doc/cli-logo.png)
 
-This project contains CLI tools enabling automation, scripting and programmatic management for such applications as [GitLab](https://about.gitlab.com/), [SonarQube](https://www.sonarqube.org/), [MS Active Directory](https://msdn.microsoft.com/en-us/library/cc223122.aspx), [HashiCorp Vault](https://www.vaultproject.io/), etc. These CLI tools are operating on _objects_ and calling certain _actions_ for those objects, taking user inputs as parameters. Each CLI tool is performing the following basic tasks:
+This project contains CLI tools enabling automation, scripting and programmatic management for such applications as [GitLab](https://about.gitlab.com/), [SonarQube](https://www.sonarqube.org/), [MS Active Directory](https://msdn.microsoft.com/en-us/library/cc223122.aspx), [HashiCorp Vault](https://www.vaultproject.io/), etc. These CLI tools are operating on _objects_ and calling certain _actions_ for those _objects_, taking user inputs as parameters. Each CLI tool is performing the following basic tasks:
 
 * Collects required and optional arguments via command line parameters
 * Validates provided arguments against defined rules and patterns
@@ -40,11 +40,11 @@ The [original project page](https://gp2x.org/adtool/) does only provide source c
 The following files included into this project:
 
 * `genUid.py` - short, monotonically increasing ID generator. The algorithm converts current time in milliseconds into a 7-char Base66 string. No collisions expected with process concurrency level of <1000 calls/second. This tool may be used for creating distinct user or database names, when registering new accounts. This is a drop-in tool requiring only Python interpreter. No further configuration required.
-* `gitlab` - CLI tool for managing GitLab users, projects and namespaces. See [gitlab CLI documentation page](doc/gitlab.README.md) for more details.
+* `gitlab` - CLI tool for managing GitLab users, projects and namespaces. See [gitlab CLI documentation page](doc/README.gitlab.md) for more details.
 * `gitlab.auto` - shell auto-completion for the gitlab tool.
-* `ldap` - CLI tool for managing MS Active Directory objects: OUs, Groups and Accounts. See [ldap CLI documentation page](doc/ldap.README.md) for more details.
+* `ldap` - CLI tool for managing MS Active Directory objects: OUs, Groups and Accounts. See [ldap CLI documentation page](doc/README.ldap.md) for more details.
 * `ldap.auto` - shell auto-completion for the ldap tool.
-* `vault` - CLI tool for querying and managing secure credential stored in Vault. See [vault CLI documentation page](doc/vault.README.md) for more details.
-* `sonar` - CLI tool for managing SonarQube project templates, projects, groups and users. See [sonar CLI documentation page](doc/sonar.README.md) for more details.
+* `vault` - CLI tool for querying and managing secure credential stored in Vault. See [vault CLI documentation page](doc/README.vault.md) for more details.
+* `sonar` - CLI tool for managing SonarQube project templates, projects, groups and users. See [sonar CLI documentation page](doc/README.sonar.md) for more details.
 * `sonar.auto` - shell auto-completion for the sonar tool.
 * `cli.lib` - it's a shell library providing implementation for common functions utilized by CLI tools.

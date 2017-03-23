@@ -25,10 +25,10 @@ $ source gitlab.auto # replace 'source' with '.' (no quotes) if you tired typing
 
 ## CLI Usage
 
-The CLI tool is operating on _objects_ by calling _actions_ for those _objects_. For each _action_ the user may provide additional input parameters.
+The CLI tool is operating on _objects_ by calling _actions_ for those _objects_. For each _action_ the user may provide additional input parameters. Some _actions_ also supporting the `--format` output parameter, which is specifying resulting output format.
 
 ```shell
-$  ./gitlab
+$ ./gitlab
 GitLab CLI management tool
 Usage: ./gitlab <object> <action> [<args 1> ... <arg N>]
 Objects and actions:
@@ -50,4 +50,93 @@ Objects and actions:
         add (create) --login <user login> --name <First Last> --mail <email> --org <LDAP org>
         del (remove) --login <user login>
 
+```
+
+## Examples
+
+The CLI tool usage is pretty straightforward and below several examples for performing basic management actions.
+
+### List GitLab groups
+
+GitLab places projects in so called groups, sometimes also called namespaces.
+
+```shell
+$ ./gitlab group list
+images
+poc
+
+$ # results displayed as a list of records by default
+$ # the next command changes output format to table
+
+$ ./gitlab group list --format table
+7	Private	images	https://gitlab.local/groups/images	Group for all container images
+3	Private	vzpoc	  https://gitlab.local/groups/poc	  POC Projects
+```
+
+### Add new GitLab group
+
+```shell
+$ ./gitlab group add --group devops --description "DevOps related projects"
+{
+  "id": 134,
+  "name": "devops",
+  "path": "devops",
+  "description": "DevOps related projects",
+  "visibility_level": 0,
+  "avatar_url": null,
+  "web_url": "https://gitlab.local/groups/devops"
+}
+gitlab: successfully added group "devops"
+```
+
+### Add new GitLab project
+
+```json
+$ ./gitlab project add --project devtest --group devops --description "Test harness"
+{
+  "id": 149,
+  "description": "Test harness",
+  "default_branch": null,
+  "tag_list": [],
+  "public": false,
+  "archived": false,
+  "visibility_level": 0,
+  "ssh_url_to_repo": "ssh://git@gitlab.local:2222/devops/devtest.git",
+  "http_url_to_repo": "https://gitlab.local/devops/devtest.git",
+  "web_url": "https://gitlab.local/devops/devtest",
+  "name": "devtest",
+  "name_with_namespace": "devops / devtest",
+  "path": "devtest",
+  "path_with_namespace": "devops/devtest",
+  "issues_enabled": true,
+  "merge_requests_enabled": true,
+  "wiki_enabled": true,
+  "builds_enabled": true,
+  "snippets_enabled": false,
+  "created_at": "2017-03-23T15:54:28.681Z",
+  "last_activity_at": "2017-03-23T15:54:31.188Z",
+  "shared_runners_enabled": true,
+  "creator_id": 7,
+  "namespace": {
+    "id": 134,
+    "name": "devops",
+    "path": "devops",
+    "owner_id": null,
+    "created_at": "2017-03-23T15:51:21.465Z",
+    "updated_at": "2017-03-23T15:51:21.465Z",
+    "description": "DevOps related projects",
+    "avatar": {
+      "url": null
+    },
+    "share_with_group_lock": false,
+    "visibility_level": 0
+  },
+  "avatar_url": null,
+  "star_count": 0,
+  "forks_count": 0,
+  "open_issues_count": 0,
+  "runners_token": "xnbvapsd-azKpAmLtbsR",
+  "public_builds": true
+}
+gitlab: project created successfully
 ```
