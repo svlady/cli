@@ -159,7 +159,7 @@ case ${obj} in
       ###======================================================================
       #H# list (dir) [--key <project key prefix>] [--pattern <pattern>]
       list|dir)
-        getOptions "key:|pattern:|format:" "$@"
+        getOptions "key:|pattern:" "$@"
 
         JQ_OPT="-r"
         if [[ ${key:-} ]]; then
@@ -338,8 +338,6 @@ case ${obj} in
       ###======================================================================
       #H# permissions
       permissions)
-        # getOptions "template|group|permission" "$@"
-
         JQ_FILTER='.permissions[]'
         apiCall -X POST --data @"${TMP_DIR}/json" "${SONAR_URL}/api/permissions/search_templates"
         ;;
