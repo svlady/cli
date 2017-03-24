@@ -139,22 +139,6 @@ function assertLen() {
 }
 
 #
-# Print error message and stop execution if the given variable
-# contains other than allowed characters
-#
-function assertChr() {
-  local _var=${1:-} # ${1}: VAR name
-  local _chr=${2:-} # ${2}: allowed chars
-  local _msg=${3:-} # ${3}: optional error message
-
-  # if error message is not provided, using default one
-  [[ ${_msg} ]] || _msg="the ${_var} can only contain ${_chr} characters, exiting..."
-
-  eval [[ \${${_var}} =~ [^${_chr}] ]] && die "${_msg}"
-  return 0
-}
-
-#
 # Print error message and stop execution if given variable does not pass the 
 # following tests:
 #  - the variable is not empty
@@ -237,12 +221,6 @@ function makeTempDir () {
 
   TMP_DIR=$(mktemp -d -p ${CLI_TEMP})
   TMP_VOL=/tmp/${TMP_DIR##*/}
-
-  # if user namespaces used, setting ownership accordingly
-  if [[ ${DCROOT_GROUP:-} ]]; then
-    chmod g=rwx ${TMP_DIR}
-    chown :${DCROOT_GROUP} ${TMP_DIR}
-  fi
 
   # register the cleanup function to be called for the given signals
   trap "rm -rf ${TMP_DIR}" EXIT SIGHUP SIGINT SIGQUIT SIGTERM
