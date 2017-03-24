@@ -90,7 +90,7 @@ $
 
 ### List Sonar template groups and their permissions
 
-As you can see from example below the project template assigned to Sonar projects by default grants `user` permissions to `Anyone`, thus allowing to access a project, browse its measures, and create/edit issues for it.
+As you can see from example below the project template assigned to Sonar projects by default grants `user` permissions to `Anyone`, thus allowing any user to access a project, browse its measures, and create/edit issues for it. Consider using different, more sepcific template in real life scenarios.
  
 ```shell
 $ ./sonar template list --format table
@@ -100,31 +100,68 @@ Anyone
 $
 ```
 
-### Add new LDAP group
+### Add new Sonar template
 
+Creating new Sonar template includes multiple steps:
+
+* creating AD/LDAP user group that will used for SonarQube authorization
+* creating SonarQube authorization group, which is mapped to the corresponding LDAP group
+* creating SonarQube permission template to tie together user, groups and their permissions
+* updating template by granting certain permissions to the corresponding user group
+
+Below is an example for the steps outlined above.
+
+#### Adding LDAP authorization group
 ```shell
-$ ./ldap group add --group "DevOps Users"
-ldap: successfully added group "DevOps Users"
+$ ./ldap group add --group "Star Agency Sonar Users"
+ldap: successfully added group "Star Agency Sonar Users"
 $
 ```
 
-### Add new LDAP account
-
+#### Creating SonarQube authorization group
 ```shell
-$ ./ldap user add --first John --last Dev --login jdev --mail jdev@company.com --password '...user password...'
-ldap: successfully added user jdev : "John Dev"
-ldap: set password for user "John Dev"
-ldap: unlocked user "John Dev"
-ldap: setting AD attributes for user "John Dev"
+$ ./sonar group add --group "Star Agency Sonar Users"
+{
+  "group": {
+    "id": "19",
+    "name": "Star Agency Sonar Users",
+    "description": "Star Agency Sonar Users project group",
+    "membersCount": 0
+  }
+}
+sonar: successfully added group "Star Agency Sonar Users"
 $
 ```
 
-### List user groups
+#### Creating SonarQube permission template
+```shell
+$ ./sonar template add --template "Star Agency" --key "star_agency:*"
+{
+  "permissionTemplate": {
+    "id": "AVm3JP0A8bCpdL7FQOOT",
+    "name": "Star Agency",
+    "description": "Star Agency permissions",
+    "projectKeyPattern": "star_agency:*",
+    "createdAt": "2017-01-19T14:32:51+0000",
+    "updatedAt": "2017-01-19T14:32:51+0000",
+    "permissions": []
+  }
+}
+$
+```
+
+#### Adding SonarQube "Browse" permission to the template
 
 ```shell
-$ ./ldap user groups --name "John Doe"
-Content Editors
-Sonar Users
-GitLab Users
+$ ./sonar template addgroup --template "Star Agency" --group "Star Agency Sonar Users" --permission "user"
+sonar: permission template updated successfully
+$
+```
+
+#### Adding SonarQube "See Source Code" permission to the template
+
+```shell
+$ ./sonar template addgroup --template "Star Agency" --group "Star Agency Sonar Users" --permission "codeviewer"
+sonar: permission template updated successfully
 $
 ```
