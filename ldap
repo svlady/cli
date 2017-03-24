@@ -41,7 +41,7 @@ makeTempDir
 
 # the LDAP credentials may be fetched from the secret vault too
 #LDAP_BINDDN=$(${CLI_HOME}/vault get /secret/cli/ldap/binddn)
-#${CLI_HOME}/vault get /secret/poc/ldap/bindpw > ${TMP_DIR}/bindpw
+#${CLI_HOME}/vault get /secret/cli/ldap/bindpw > ${TMP_DIR}/bindpw
 echo "${LDAP_BINDPW}" > ${TMP_DIR}/bindpw
 
 # checking required variables and tools
