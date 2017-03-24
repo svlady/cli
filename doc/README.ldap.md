@@ -64,7 +64,7 @@ Objects and actions:
 
 ## Examples
 
-The CLI tool usage is pretty straightforward and below several examples for performing basic management actions.
+The CLI tool usage is pretty straightforward and below you can see several examples for performing basic management actions.
 
 ### List LDAP groups
 
@@ -86,7 +86,6 @@ $
 Results displayed as a list of records by default. The next command changes output format to more detailed.
 
 ```shell
-
 $ ./ldap group list --format long
 CN=GitLab Users,CN=Groups,OU=HOSTING,DC=LOCAL
 CN=Sonar Administrators,CN=Groups,OU=HOSTING,DC=LOCAL
