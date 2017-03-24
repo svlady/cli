@@ -133,6 +133,7 @@ function assertLen() {
   # if error message is not provided, using default one
   [[ ${_msg} ]] || _msg="the ${_var} length must be less than ${_len} characters, exiting..."
 
+  eval [[ \${${_var}:-} ]] || die "the ${_var} is not defined, exiting..."
   eval [[ \${#${_var}} -lt ${_len} ]] || die "${_msg}"
   return 0
 }
