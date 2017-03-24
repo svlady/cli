@@ -10,7 +10,7 @@ This project contains CLI tools enabling automation, scripting and programmatic 
 * Collects API call results and handles errors and exceptions
 * Filters and formats results as requested
 
-The project attempting to minimize reliance on external tools and reduce number of dependencies, however, the following packages (or binaries) are required for proper operation:
+The project is attempting to minimize reliance on external tools and reduce number of dependencies, however, the following packages (or binaries) are required for proper operation:
 
 * [curl](https://curl.haxx.se/) - the URL querying tool. Most probably you have it already installed, otherwise, pretty much all modern distributions providing a package that may be deployed by your distribution package manager.
 * [jq](https://stedolan.github.io/jq/) - lightweight and flexible JSON processor. It could have been avoided, but it makes JSON processing tasks so that much easier and installation is so simple that it may be considered as a must have tool.

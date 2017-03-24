@@ -3,7 +3,7 @@
 The CLI tool requires two parameters for accessing GitLab API endpoint:
 
 * `GITLAB_API` - the API endpoint URL
-* `GITLAB_TOKEN` - the authentication token issued for GitLab user. You API calls will be impersonated as this user, who issued the token. Obviously, the user must be given sufficient permissions for performing management actions on GitLab objects.
+* `GITLAB_TOKEN` - the authentication token issued by the GitLab user. Your API calls will be impersonated as this user, who issued the token. Obviously, the user must be given sufficient permissions for performing management actions on GitLab objects.
 
 These parameters are usually provided as shell environment variables. However, for additional security, you may want to fetch the token from Vault. For this you need to have Vault up and running. See configuration example inside the `gitlab` script, in comments.
 
@@ -17,7 +17,7 @@ You can perform this configuration once in your current shell or add these varia
 
 ## Setting up shell auto-completion
 
-There is a bash shell auto-completion function provided, which is providing hints and simplifies command line entry a great deal. Just source provided file as shown in example below. Alternatively, you can setup auto-completion permanently by adding this command to your shell initialization script.
+The corresponding `.auto` file contains shell auto-completion function, which is providing hints and simplifies command line entry a great deal. For activation just source provided file as shown in the example below. Alternatively, you can setup auto-completion permanently by adding this command to your shell initialization script or otherwise setup autocompletion as described in your distribution documentation.
 
 ```shell
 $ source gitlab.auto # replace 'source' with '.' (no quotes) if you tired typing, those two are synonyms 
