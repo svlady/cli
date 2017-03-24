@@ -3,7 +3,7 @@
 The CLI tool requires two parameters for accessing GitLab API endpoint:
 
 * `VAULT_API` - the API endpoint URL
-* `VAULT_TOKEN` - the authentication token issued by the Vault user. Your API calls will be impersonated as this user, who issued the token. Obviously, the user must be given sufficient permissions for performing management actions on GitLab objects.
+* `VAULT_TOKEN` - the authentication token issued by the Vault user. Your API calls will be impersonated as this user, who issued the token. Obviously, the user must be given sufficient permissions for performing management actions on Vault objects.
 
 These parameters are usually provided as shell environment variables. Make sure that your VAULT_TOKEN is well protected, it's a key to your secure credential storage.
 
